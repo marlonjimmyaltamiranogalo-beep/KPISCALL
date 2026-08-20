@@ -1,0 +1,6 @@
+{
+  "name": "Call center Expresso - Netmobile",
+  "description": "Dashboard interactivo para Call Center en Dark Mode con análisis de reportes CDR, tiempos muertos e inactividad, KPIs Outbound e Inbound, filtros multifecha y exclusión de horarios de almuerzo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
