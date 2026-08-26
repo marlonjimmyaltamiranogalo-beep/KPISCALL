@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { 
@@ -12,11 +12,17 @@ import {
   FileText, 
   ArrowRight,
   HelpCircle,
-  Database
+  Database,
+  Calendar
 } from 'lucide-react';
 import { RawCDRRow, ColumnMapping } from '../types';
-import { generateSampleCsvString, generateSampleCampaign2CsvString } from '../utils/cdrEngine';
-import { generateDefaultCDRDataset, generateCampaign2CDRDataset } from '../data/mockCdrData';
+import { 
+  generateSampleCsvString, 
+  processRawCDRRows,
+  analyzeDatasetDateBounds,
+  formatDateDisplay
+} from '../utils/cdrEngine';
+import { generateDefaultCDRDataset } from '../data/mockCdrData';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -50,6 +56,17 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [showMappingConfig, setShowMappingConfig] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Compute preview bounds on parsed rows
+  const previewBounds = useMemo(() => {
+    if (!parsedRows || parsedRows.length === 0) return null;
+    try {
+      const records = processRawCDRRows(parsedRows.slice(0, 500), mapping);
+      return analyzeDatasetDateBounds(records);
+    } catch {
+      return null;
+    }
+  }, [parsedRows, mapping]);
 
   if (!isOpen) return null;
 
@@ -155,9 +172,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     onClose();
   };
 
-  const handleDownloadTemplate = (format: 1 | 2 = 1) => {
-    const csvContent = format === 1 ? generateSampleCsvString() : generateSampleCampaign2CsvString();
-    const fileName = format === 1 ? 'plantilla_cdr_campana_home.csv' : 'plantilla_cdr_campana_pospago.csv';
+  const handleDownloadTemplate = () => {
+    const csvContent = generateSampleCsvString();
+    const fileName = 'plantilla_cdr_llamadas.csv';
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -168,27 +185,16 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     document.body.removeChild(link);
   };
 
-  const handleLoadPreset = (campaignType: 1 | 2) => {
+  const handleLoadPreset = () => {
     setErrorMsg(null);
-    if (campaignType === 1) {
-      const data = generateDefaultCDRDataset();
-      setFileName('campana_home_cdr.csv');
-      setFileSize('12.4 KB');
-      const headers = ['date_time', 'duration', 'calltype', 'from', 'to'];
-      setAvailableHeaders(headers);
-      setParsedRows(data);
-      autoDetectColumns(headers);
-      setShowMappingConfig(true);
-    } else {
-      const data = generateCampaign2CDRDataset();
-      setFileName('campana_pospago_cdr.csv');
-      setFileSize('8.6 KB');
-      const headers = ['Fecha', 'Hora', 'Origen', 'Destino', 'Duración', 'Tipo', 'File'];
-      setAvailableHeaders(headers);
-      setParsedRows(data);
-      autoDetectColumns(headers);
-      setShowMappingConfig(true);
-    }
+    const data = generateDefaultCDRDataset();
+    setFileName('cdr_dataset_ejemplo.csv');
+    setFileSize('12.4 KB');
+    const headers = ['date_time', 'duration', 'calltype', 'from', 'to'];
+    setAvailableHeaders(headers);
+    setParsedRows(data);
+    autoDetectColumns(headers);
+    setShowMappingConfig(true);
   };
 
   return (
@@ -257,9 +263,25 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             </div>
 
             {fileName && (
-              <div className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-lg border border-emerald-500/20 text-xs font-mono">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>{fileName} ({fileSize}) - {parsedRows.length} filas detectadas</span>
+              <div className="flex flex-col gap-1.5 w-full">
+                <div className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-3 py-1.5 rounded-lg border border-emerald-500/20 text-xs font-mono justify-between">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>{fileName} ({fileSize}) - {parsedRows.length} filas detectadas</span>
+                  </div>
+                </div>
+
+                {previewBounds && previewBounds.availableDates.length > 0 && (
+                  <div className="flex items-center gap-2 bg-indigo-950/40 text-indigo-300 px-3 py-1.5 rounded-lg border border-indigo-500/30 text-xs justify-between">
+                    <span className="flex items-center gap-1.5 font-semibold">
+                      <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+                      Rango de fechas detectado:
+                    </span>
+                    <span className="font-mono font-bold text-white">
+                      {previewBounds.minDateStr} al {previewBounds.maxDateStr} ({previewBounds.totalUniqueDates} {previewBounds.totalUniqueDates === 1 ? 'día' : 'días'})
+                    </span>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -444,26 +466,18 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             </div>
           )}
 
-          {/* Quick Actions & Campaign Presets */}
+          {/* Quick Actions & Demo Presets */}
           <div className="flex flex-col gap-3 text-xs border-t border-slate-800 pt-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-[11px] font-semibold text-slate-400">Cargar Campaña de Ejemplo:</span>
+              <span className="text-[11px] font-semibold text-slate-400">Cargar Datos de Demostración:</span>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => handleLoadPreset(1)}
-                  className="px-2.5 py-1 rounded bg-[#1a1a20] hover:bg-slate-800 text-slate-200 border border-slate-700 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  onClick={handleLoadPreset}
+                  className="px-3 py-1.5 rounded bg-[#1a1a20] hover:bg-slate-800 text-slate-200 border border-slate-700 transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
                   <Database className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Campaña Home</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleLoadPreset(2)}
-                  className="px-2.5 py-1 rounded bg-[#1a1a20] hover:bg-slate-800 text-slate-200 border border-slate-700 transition-colors flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Database className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Campaña Pospago</span>
+                  <span>Cargar Dataset de Ejemplo</span>
                 </button>
               </div>
             </div>
@@ -472,20 +486,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => handleDownloadTemplate(1)}
+                  onClick={handleDownloadTemplate}
                   className="text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Plantilla Campaña Home (.csv)</span>
-                </button>
-                <span className="text-slate-600">|</span>
-                <button
-                  type="button"
-                  onClick={() => handleDownloadTemplate(2)}
-                  className="text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Plantilla Campaña Pospago (.csv)</span>
+                  <span>Descargar Plantilla CSV (.csv)</span>
                 </button>
               </div>
 

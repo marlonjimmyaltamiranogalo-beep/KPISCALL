@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Upload, 
   RotateCcw, 
@@ -7,12 +7,16 @@ import {
   Menu, 
   X, 
   Clock, 
-  CalendarDays,
-  Utensils,
-  ChevronDown,
-  Ban
+  CalendarDays, 
+  Utensils, 
+  ChevronDown, 
+  Ban,
+  LogOut,
+  User as UserIcon,
+  ShieldCheck
 } from 'lucide-react';
 import { ShiftFilter } from '../types';
+import { useAuth } from '../context/AuthContext';
 
 interface TopHeaderProps {
   activeTab: 'tiempos-muertos' | 'outbound' | 'inbound';
@@ -69,6 +73,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenMobileNav,
   filteredCallsCount
 }) => {
+  const { user, userProfile, signOut } = useAuth();
   const isMultiDateActive = selectedDates.length > 0 && !selectedDates.includes('all') && selectedDates.length < availableDates.length;
   const isLunchExcluded = excludedHours.length > 0;
   const isCustomHoursActive = selectedHours.length > 0 && selectedHours.length < 24;
@@ -189,6 +194,34 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             >
               <RefreshCw className="w-4 h-4" />
             </button>
+
+            {user && (
+              <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
+                <div className="hidden xl:flex flex-col items-end text-right">
+                  <span className="text-xs font-semibold text-white truncate max-w-[140px]">
+                    {userProfile?.displayName || user.displayName || user.email?.split('@')[0] || 'Auditor'}
+                  </span>
+                  <span className="text-[10px] text-indigo-400 font-mono capitalize">
+                    {userProfile?.role || 'Supervisor'}
+                  </span>
+                </div>
+
+                <div 
+                  className="w-8 h-8 rounded-lg bg-indigo-950/60 border border-indigo-500/30 flex items-center justify-center text-indigo-300 font-bold text-xs"
+                  title={user.email || ''}
+                >
+                  {(user.displayName?.[0] || user.email?.[0] || 'A').toUpperCase()}
+                </div>
+
+                <button
+                  onClick={signOut}
+                  title="Cerrar Sesión"
+                  className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors border border-slate-800 cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

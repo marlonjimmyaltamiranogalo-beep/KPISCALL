@@ -7,7 +7,8 @@ import {
   InboundExtensionStats,
   HourlyDistribution,
   FilterOptions,
-  ColumnMapping
+  ColumnMapping,
+  DatasetDateBounds
 } from '../types';
 
 const MONTHS_SPANISH_ENGLISH: Record<string, number> = {
@@ -38,6 +39,160 @@ const MONTHS_SPANISH_ENGLISH: Record<string, number> = {
   novi: 10, noviembre: 10,
   dic: 11, dici: 11, diciembre: 11
 };
+
+/**
+ * Formats a Date object into a standard 'YYYY-MM-DD' key using local calendar date values,
+ * strictly preventing timezone skew / day-shift artifacts.
+ */
+export function formatDateKey(date: Date): string {
+  if (!date || !(date instanceof Date) || isNaN(date.getTime())) return '';
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Formats a 'YYYY-MM-DD' string or Date object into human-readable Spanish text.
+ * e.g. "18 Ago 2026" or "Martes, 18 de agosto de 2026"
+ */
+export function formatDateDisplay(dateInput: string | Date, mode: 'short' | 'medium' | 'long' = 'medium'): string {
+  let dateObj: Date;
+  if (typeof dateInput === 'string') {
+    const parts = dateInput.split('-');
+    if (parts.length === 3) {
+      dateObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    } else {
+      dateObj = new Date(dateInput);
+    }
+  } else {
+    dateObj = dateInput;
+  }
+
+  if (!dateObj || isNaN(dateObj.getTime())) {
+    return typeof dateInput === 'string' ? dateInput : '';
+  }
+
+  if (mode === 'short') {
+    const d = String(dateObj.getDate()).padStart(2, '0');
+    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+    return `${d}/${m}`;
+  }
+
+  if (mode === 'long') {
+    return dateObj.toLocaleDateString('es-ES', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
+  }
+
+  return dateObj.toLocaleDateString('es-ES', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+}
+
+/**
+ * Checks if a list of sorted YYYY-MM-DD strings forms an uninterrupted daily sequence.
+ */
+function checkDateContinuity(sortedDates: string[]): boolean {
+  if (sortedDates.length <= 1) return true;
+  for (let i = 0; i < sortedDates.length - 1; i++) {
+    const [y1, m1, d1] = sortedDates[i].split('-').map(Number);
+    const [y2, m2, d2] = sortedDates[i + 1].split('-').map(Number);
+    const cur = new Date(y1, m1 - 1, d1).getTime();
+    const next = new Date(y2, m2 - 1, d2).getTime();
+    const diffDays = Math.round((next - cur) / (1000 * 60 * 60 * 24));
+    if (diffDays !== 1) return false;
+  }
+  return true;
+}
+
+/**
+ * Analyzes the real minimum and maximum dates across parsed CDR records,
+ * guarantees complete extraction of availableDates without truncation or omission,
+ * and returns a detailed date boundary summary.
+ */
+export function analyzeDatasetDateBounds(records: CDRRecord[]): DatasetDateBounds {
+  if (!records || records.length === 0) {
+    return {
+      minDate: null,
+      maxDate: null,
+      minDateStr: null,
+      maxDateStr: null,
+      minDateFormatted: undefined,
+      maxDateFormatted: undefined,
+      availableDates: [],
+      totalUniqueDates: 0,
+      dateCounts: {},
+      totalRecordsProcessed: 0,
+      validDateRecordsCount: 0,
+      invalidDateRecordsCount: 0,
+      isContinuous: false
+    };
+  }
+
+  const dateCountMap: Record<string, number> = {};
+  let minTimestamp = Infinity;
+  let maxTimestamp = -Infinity;
+  let minDateObj: Date | null = null;
+  let maxDateObj: Date | null = null;
+  let validCount = 0;
+  let invalidCount = 0;
+
+  records.forEach(r => {
+    if (r.dateTime instanceof Date && !isNaN(r.dateTime.getTime())) {
+      validCount++;
+      const time = r.dateTime.getTime();
+      if (time < minTimestamp) {
+        minTimestamp = time;
+        minDateObj = r.dateTime;
+      }
+      if (time > maxTimestamp) {
+        maxTimestamp = time;
+        maxDateObj = r.dateTime;
+      }
+
+      const dateKey = formatDateKey(r.dateTime);
+      if (dateKey) {
+        dateCountMap[dateKey] = (dateCountMap[dateKey] || 0) + 1;
+      }
+    } else {
+      invalidCount++;
+    }
+  });
+
+  // Extract and strictly sort all unique dates chronologically (earliest to latest)
+  const uniqueDates = Object.keys(dateCountMap).sort();
+  const minDateStr = uniqueDates.length > 0 ? uniqueDates[0] : null;
+  const maxDateStr = uniqueDates.length > 0 ? uniqueDates[uniqueDates.length - 1] : null;
+
+  return {
+    minDate: minDateObj,
+    maxDate: maxDateObj,
+    minDateStr,
+    maxDateStr,
+    minDateFormatted: minDateStr ? formatDateDisplay(minDateStr, 'medium') : undefined,
+    maxDateFormatted: maxDateStr ? formatDateDisplay(maxDateStr, 'medium') : undefined,
+    availableDates: uniqueDates,
+    totalUniqueDates: uniqueDates.length,
+    dateCounts: dateCountMap,
+    totalRecordsProcessed: records.length,
+    validDateRecordsCount: validCount,
+    invalidDateRecordsCount: invalidCount,
+    isContinuous: checkDateContinuity(uniqueDates)
+  };
+}
+
+/**
+ * Extracts unique available dates in 'YYYY-MM-DD' format sorted chronologically.
+ */
+export function extractUniqueAvailableDates(records: CDRRecord[]): string[] {
+  return analyzeDatasetDateBounds(records).availableDates;
+}
 
 /**
  * Parses various date-time formats safely, handling both single combined fields
@@ -94,7 +249,7 @@ export function parseDateTime(dateVal: any, timeVal?: any): Date | null {
   // Date portion only
   const dateOnlyStr = combined.replace(/(?:T|\s+)\d{1,2}:\d{1,2}(?::\d{1,2})?(?:\s*(?:am|pm))?/i, '').trim();
 
-  // 1. Text Month Pattern (e.g. "18 Aug 2026", "18-Ago-2026", "18 de Agosto de 2026")
+  // 1. Text Month Pattern (e.g. "18 Aug 2026", "18-Ago-2026", "18 de Agosto de 2026", "18/Ago/2026")
   const textMonthMatch = dateOnlyStr.match(/^(\d{1,2})[\s\-/.de]+([a-zA-ZáéíóúÁÉÍÓÚ]{3,15})[\s\-/.de]+(\d{2,4})/i);
   if (textMonthMatch) {
     const day = parseInt(textMonthMatch[1], 10);
@@ -114,7 +269,7 @@ export function parseDateTime(dateVal: any, timeVal?: any): Date | null {
     }
   }
 
-  // 2. Month Text First (e.g. "Aug 18, 2026" or "Agosto 18 2026")
+  // 2. Month Text First (e.g. "Aug 18, 2026" or "Agosto 18 2026" or "August 18 2026")
   const monthTextFirstMatch = dateOnlyStr.match(/^([a-zA-ZáéíóúÁÉÍÓÚ]{3,15})[\s\-/.de]+(\d{1,2})(?:st|nd|rd|th)?,?[\s\-/.de]+(\d{2,4})/i);
   if (monthTextFirstMatch) {
     const mStr = monthTextFirstMatch[1].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").slice(0, 4);
@@ -134,25 +289,39 @@ export function parseDateTime(dateVal: any, timeVal?: any): Date | null {
     }
   }
 
-  // 3. DD/MM/YYYY or DD-MM-YYYY
-  const dmyMatch = dateOnlyStr.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/);
+  // 3. DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
+  const dmyMatch = dateOnlyStr.match(/^(\d{1,2})[/\-. ](\d{1,2})[/\-. ](\d{2,4})/);
   if (dmyMatch) {
-    const day = parseInt(dmyMatch[1], 10);
-    const month = parseInt(dmyMatch[2], 10) - 1;
+    let first = parseInt(dmyMatch[1], 10);
+    let second = parseInt(dmyMatch[2], 10);
     let year = parseInt(dmyMatch[3], 10);
     if (year < 100) year += 2000;
-    const parsed = new Date(year, month, day, hours, minutes, seconds);
-    if (!isNaN(parsed.getTime())) return parsed;
+
+    let day = first;
+    let month = second - 1;
+
+    // Disambiguate if first > 12 (must be day) or second > 12 (second must be day)
+    if (second > 12 && first <= 12) {
+      day = second;
+      month = first - 1;
+    }
+
+    if (month >= 0 && month <= 11 && day >= 1 && day <= 31) {
+      const parsed = new Date(year, month, day, hours, minutes, seconds);
+      if (!isNaN(parsed.getTime())) return parsed;
+    }
   }
 
-  // 4. YYYY-MM-DD or YYYY/MM/DD
-  const ymdMatch = dateOnlyStr.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  // 4. YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
+  const ymdMatch = dateOnlyStr.match(/^(\d{4})[/\-. ](\d{1,2})[/\-. ](\d{1,2})/);
   if (ymdMatch) {
     const year = parseInt(ymdMatch[1], 10);
     const month = parseInt(ymdMatch[2], 10) - 1;
     const day = parseInt(ymdMatch[3], 10);
-    const parsed = new Date(year, month, day, hours, minutes, seconds);
-    if (!isNaN(parsed.getTime())) return parsed;
+    if (month >= 0 && month <= 11 && day >= 1 && day <= 31) {
+      const parsed = new Date(year, month, day, hours, minutes, seconds);
+      if (!isNaN(parsed.getTime())) return parsed;
+    }
   }
 
   // 5. Standard JS Date constructor fallback
@@ -365,10 +534,7 @@ export function filterCDRRecords(records: CDRRecord[], filters: FilterOptions): 
     }
 
     // 3. Multi-Date or Single Date filter
-    const year = dateObj.getFullYear();
-    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const day = String(dateObj.getDate()).padStart(2, '0');
-    const recordDateStr = `${year}-${month}-${day}`;
+    const recordDateStr = formatDateKey(dateObj);
 
     if (hasDateList) {
       if (!filters.selectedDates!.includes(recordDateStr)) {
@@ -843,19 +1009,3 @@ export function generateSampleCsvString(): string {
   return headers + rows.join('\n');
 }
 
-/**
- * Generate downloadable CSV sample template (Format 2: Separate Fecha, Hora, Origen, Destino, Duración, Tipo)
- */
-export function generateSampleCampaign2CsvString(): string {
-  return `"Fecha","Hora","Origen","Destino","Duración","Tipo","File"
-"18 Aug 2026","10:06:04","5005","987589936","00:00:18","Saliente","out-987589936-5005-20260818-100604-1787069164.135918.wav"
-"18 Aug 2026","10:05:41","3011","978348106","00:00:26","Saliente","out-978348106-3011-20260818-100541-1787069141.135915.wav"
-"18 Aug 2026","10:05:22","3001","976361886","00:00:29","Saliente","out-976361886-3001-20260818-100522-1787069122.135911.wav"
-"18 Aug 2026","10:05:09","3001","976892128","00:00:06","Saliente","out-976892128-3001-20260818-100509-1787069109.135909.wav"
-"18 Aug 2026","10:04:27","5001","987622451","00:01:40","Saliente","out-987622451-5001-20260818-100427-1787069067.135904.wav"
-"18 Aug 2026","10:04:18","3002","981898322","00:00:27","Saliente","out-981898322-3002-20260818-100418-1787069058.135902.wav"
-"18 Aug 2026","10:04:08","3011","984769313","00:01:03","Saliente","out-984769313-3011-20260818-100408-1787069048.135900.wav"
-"18 Aug 2026","10:03:51","5016","987880327","00:00:09","Saliente","out-987880327-5016-20260818-100351-1787069031.135897.wav"
-"18 Aug 2026","10:03:43","5004","986502874","00:01:46","Saliente","out-986502874-5004-20260818-100343-1787069023.135895.wav"
-"18 Aug 2026","10:03:37","5016","987880327","00:00:09","Saliente","out-987880327-5016-20260818-100337-1787069017.135893.wav"`;
-}

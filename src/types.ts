@@ -92,3 +92,19 @@ export interface ColumnMapping {
   fromCol: string;
   toCol: string;
 }
+
+export interface DatasetDateBounds {
+  minDate: Date | null;
+  maxDate: Date | null;
+  minDateStr: string | null;
+  maxDateStr: string | null;
+  minDateFormatted?: string;
+  maxDateFormatted?: string;
+  availableDates: string[];
+  totalUniqueDates: number;
+  dateCounts: Record<string, number>;
+  totalRecordsProcessed: number;
+  validDateRecordsCount: number;
+  invalidDateRecordsCount: number;
+  isContinuous: boolean;
+}

@@ -9,8 +9,11 @@ import {
   Headphones,
   Ban,
   CalendarDays,
-  Utensils
+  Utensils,
+  LogOut,
+  User as UserIcon
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 interface MobileNavProps {
   isOpen: boolean;
@@ -39,6 +42,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   onOpenDateModal,
   onOpenHourlyLunchModal
 }) => {
+  const { user, userProfile, signOut } = useAuth();
   if (!isOpen) return null;
 
   return (
@@ -183,8 +187,35 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           </button>
         </div>
 
+        {/* User Profile & Sign Out */}
+        {user && (
+          <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <div className="w-8 h-8 rounded-lg bg-indigo-950/70 border border-indigo-500/30 flex items-center justify-center text-indigo-300 font-bold text-xs shrink-0">
+                {(user.displayName?.[0] || user.email?.[0] || 'U').toUpperCase()}
+              </div>
+              <div className="flex flex-col min-w-0 flex-1">
+                <span className="text-xs font-semibold text-white truncate">
+                  {userProfile?.displayName || user.displayName || user.email?.split('@')[0]}
+                </span>
+                <span className="text-[10px] text-indigo-400 font-mono capitalize">
+                  {userProfile?.role || 'Supervisor'}
+                </span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => { signOut(); onClose(); }}
+              title="Cerrar Sesión"
+              className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors shrink-0"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Footer info */}
-        <div className="pt-3 border-t border-slate-800 text-[11px] text-slate-500 flex justify-between">
+        <div className="pt-2 text-[11px] text-slate-500 flex justify-between">
           <span>Total Llamadas</span>
           <span className="font-bold text-slate-300">{totalCalls.toLocaleString()}</span>
         </div>

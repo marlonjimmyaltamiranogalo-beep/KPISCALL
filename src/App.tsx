@@ -11,6 +11,8 @@ import { ExtensionExclusionModal } from './components/ExtensionExclusionModal';
 import { DateMultiSelectModal } from './components/DateMultiSelectModal';
 import { HourlyLunchFilterModal } from './components/HourlyLunchFilterModal';
 import { MobileNav } from './components/MobileNav';
+import { LoginScreen } from './components/LoginScreen';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { generateDefaultCDRDataset } from './data/mockCdrData';
 import { 
   processRawCDRRows, 
@@ -18,18 +20,23 @@ import {
   calculateInactivityAnalysis, 
   calculateOutboundAnalysis, 
   calculateInboundAnalysis,
-  generateSampleCsvString
+  generateSampleCsvString,
+  analyzeDatasetDateBounds,
+  formatDateDisplay,
+  formatDateKey
 } from './utils/cdrEngine';
-import { RawCDRRow, CDRRecord, ShiftFilter, ColumnMapping } from './types';
+import { RawCDRRow, CDRRecord, ShiftFilter, ColumnMapping, DatasetDateBounds } from './types';
 import { 
   Activity, 
   Layers, 
   UserCheck, 
   Upload, 
-  CheckCircle2
+  CheckCircle2,
+  Headphones
 } from 'lucide-react';
 
-export default function App() {
+function DashboardApp() {
+  const { user, loading } = useAuth();
   // 1. Raw and Parsed CDR Data State
   const [rawCDRData, setRawCDRData] = useState<RawCDRRow[]>(() => generateDefaultCDRDataset());
   const [cdrRecords, setCdrRecords] = useState<CDRRecord[]>(() => {
@@ -67,20 +74,15 @@ export default function App() {
     }
   }, [toastMessage]);
 
-  // Extract all unique extensions and dates from full dataset
-  const { availableExtensions, availableDates, totalUniqueAgents } = useMemo(() => {
+  // Extract all unique extensions and exact chronological date bounds from dataset
+  const { availableExtensions, availableDates, totalUniqueAgents, dateBounds } = useMemo(() => {
+    const bounds = analyzeDatasetDateBounds(cdrRecords);
     const exts = new Set<string>();
-    const dates = new Set<string>();
 
     cdrRecords.forEach(r => {
       if (r.agentExtension) exts.add(r.agentExtension);
       if (r.from && r.from.length <= 6) exts.add(r.from);
       if (r.to && r.to.length <= 6) exts.add(r.to);
-
-      const y = r.dateTime.getFullYear();
-      const m = String(r.dateTime.getMonth() + 1).padStart(2, '0');
-      const d = String(r.dateTime.getDate()).padStart(2, '0');
-      dates.add(`${y}-${m}-${d}`);
     });
 
     const cleanExts = Array.from(exts).filter(e => {
@@ -92,8 +94,9 @@ export default function App() {
 
     return {
       availableExtensions: cleanExts,
-      availableDates: Array.from(dates).sort(),
-      totalUniqueAgents: cleanExts.length
+      availableDates: bounds.availableDates,
+      totalUniqueAgents: cleanExts.length,
+      dateBounds: bounds
     };
   }, [cdrRecords]);
 
@@ -128,6 +131,8 @@ export default function App() {
   // Handlers
   const handleDataLoaded = (rows: RawCDRRow[], mapping?: Partial<ColumnMapping>) => {
     const processed = processRawCDRRows(rows, mapping);
+    const bounds = analyzeDatasetDateBounds(processed);
+
     setRawCDRData(rows);
     setCdrRecords(processed);
     setSelectedExtension('all');
@@ -136,13 +141,27 @@ export default function App() {
     setSelectedHours(Array.from({ length: 24 }, (_, i) => i));
     setExcludedHours([]);
     setExcludedExtensions([]);
-    setToastMessage(`¡Archivo procesado con éxito! Se cargaron ${processed.length} llamadas.`);
+
+    if (bounds.availableDates.length > 1) {
+      setToastMessage(
+        `¡Dataset cargado con éxito! ${processed.length} llamadas procesadas del ${bounds.minDateStr} al ${bounds.maxDateStr} (${bounds.totalUniqueDates} días sin truncamiento).`
+      );
+    } else if (bounds.availableDates.length === 1) {
+      setToastMessage(
+        `¡Dataset cargado con éxito! ${processed.length} llamadas procesadas para la fecha ${bounds.minDateStr}.`
+      );
+    } else {
+      setToastMessage(`¡Archivo procesado con éxito! Se cargaron ${processed.length} llamadas.`);
+    }
   };
 
   const handleResetDemo = () => {
     const demo = generateDefaultCDRDataset();
+    const processed = processRawCDRRows(demo);
+    const bounds = analyzeDatasetDateBounds(processed);
+
     setRawCDRData(demo);
-    setCdrRecords(processRawCDRRows(demo));
+    setCdrRecords(processed);
     setShift('morning');
     setSelectedExtension('all');
     setSelectedDate('all');
@@ -150,7 +169,7 @@ export default function App() {
     setSelectedHours(Array.from({ length: 24 }, (_, i) => i));
     setExcludedHours([]);
     setExcludedExtensions([]);
-    setToastMessage('Datos de demostración restaurados correctamente.');
+    setToastMessage(`Datos de demostración restaurados (${processed.length} llamadas, fecha ${bounds.minDateStr || '2026-08-19'}).`);
   };
 
   const handleToggleExcludeExtension = (ext: string) => {
@@ -241,6 +260,22 @@ export default function App() {
     : shift === 'afternoon'
     ? 'Picos de inactividad (14:00 - 20:00)'
     : 'Picos de inactividad (24 Horas)';
+
+  if (loading) {
+    return (
+      <div className="min-h-screen w-full bg-[#0b0c10] flex flex-col items-center justify-center p-4">
+        <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 mb-4 animate-pulse">
+          <Headphones className="w-6 h-6" />
+        </div>
+        <div className="text-white font-semibold text-sm mb-1">Cargando Call Center Expresso...</div>
+        <div className="text-xs text-slate-500">Verificando sesión segura de Firebase</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginScreen />;
+  }
 
   return (
     <div className="min-h-screen bg-[#0b1326] text-[#dae2fd] font-sans antialiased flex flex-col selection:bg-[#4d8eff]/30 selection:text-[#d8e2ff]">
@@ -441,6 +476,7 @@ export default function App() {
         onSetSelectedDates={handleSetSelectedDates}
         onSelectAllDates={handleSelectAllDates}
         cdrRecords={cdrRecords}
+        dateBounds={dateBounds}
       />
 
       <HourlyLunchFilterModal
@@ -467,5 +503,13 @@ export default function App() {
         alerts={inactivityAnalysis.alerts}
       />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <DashboardApp />
+    </AuthProvider>
   );
 }

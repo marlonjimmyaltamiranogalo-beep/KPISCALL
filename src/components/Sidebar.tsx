@@ -9,8 +9,12 @@ import {
   FileSpreadsheet, 
   Headphones,
   ShieldAlert,
-  PhoneCall
+  PhoneCall,
+  LogOut,
+  User as UserIcon,
+  ShieldCheck
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 interface SidebarProps {
   activeView: string;
@@ -29,6 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   totalRecordsCount,
   activeAgentsCount
 }) => {
+  const { user, userProfile, signOut } = useAuth();
   return (
     <aside 
       id="sidebar-navigation"
@@ -141,14 +146,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        <button
-          id="nav-btn-team-settings"
-          onClick={() => setActiveView('settings')}
-          className="flex items-center gap-3 w-full px-3.5 py-2 text-slate-500 hover:text-slate-300 hover:bg-[#1a1a20] rounded-lg transition-colors mt-2 text-xs"
-        >
-          <Users className="w-4 h-4" />
-          <span>Team Settings</span>
-        </button>
+        {/* User Profile & Sign Out */}
+        {user && (
+          <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2 px-1">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <div className="w-8 h-8 rounded-lg bg-indigo-950/70 border border-indigo-500/30 flex items-center justify-center text-indigo-300 font-bold text-xs shrink-0">
+                {(user.displayName?.[0] || user.email?.[0] || 'U').toUpperCase()}
+              </div>
+              <div className="flex flex-col min-w-0 flex-1">
+                <span className="text-xs font-semibold text-white truncate">
+                  {userProfile?.displayName || user.displayName || user.email?.split('@')[0]}
+                </span>
+                <span className="text-[10px] text-indigo-400 font-mono capitalize">
+                  {userProfile?.role || 'Supervisor'}
+                </span>
+              </div>
+            </div>
+
+            <button
+              onClick={signOut}
+              title="Cerrar Sesión"
+              className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors shrink-0 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </nav>
     </aside>
   );
